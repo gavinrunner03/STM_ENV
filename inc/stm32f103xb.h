@@ -138,7 +138,7 @@ typedef enum
 
 /** 
   * @brief Analog to Digital Converter  
-  */
+  */a
 
 typedef struct
 {
