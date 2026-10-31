@@ -1,51 +1,63 @@
-# Name of your final output binary files
-TARGET = firmware
+# STM32F103C8 Blue Pill. Run with: make
+# Place linker_script.ld in the project root.
+.DEFAULT_GOAL := all
+TARGET := firmware
+BUILD := build
+PREFIX ?= arm-none-eabi-
+CC := $(PREFIX)gcc
+OBJCOPY := $(PREFIX)objcopy
+SIZE := $(PREFIX)size
 
-# Directory configurations
-SRCDIR = src
-INCDIR = inc
-BUILDDIR = build
+# Add CMSIS include directories here if your source uses CMSIS headers.
+INCLUDES := -Iinc
+CPPFLAGS += -DSTM32F103xB $(INCLUDES)
+CPU := -mcpu=cortex-m3 -mthumb -mfloat-abi=soft
+CFLAGS += $(CPU) -std=c11 -Og -g3 -Wall -Wextra \
+          -ffunction-sections -fdata-sections -MMD -MP
+ASFLAGS := $(CPU) -g3
+LDSCRIPT := linker_script.ld
+LDFLAGS += $(CPU) -T$(LDSCRIPT) --specs=nosys.specs \
+           -Wl,--gc-sections -Wl,-Map=$(BUILD)/$(TARGET).map
+LDLIBS += -Wl,--start-group -lc -lm -Wl,--end-group
 
-# Compiler and toolchain definitions (Matches your Docker environment)
-CC = arm-none-eabi-gcc
-OBJCOPY = arm-none-eabi-objcopy
-SIZE = arm-none-eabi-size
+# Collect files directly under src/. Supports .s and preprocessed .S.
+C_SOURCES := $(wildcard src/*.c)
+ASM_SOURCES := $(wildcard src/*.s)
+ASMPP_SOURCES := $(wildcard src/*.S)
+OBJECTS := $(patsubst src/%.c,$(BUILD)/%.o,$(C_SOURCES)) \
+           $(patsubst src/%.s,$(BUILD)/%.o,$(ASM_SOURCES)) \
+           $(patsubst src/%.S,$(BUILD)/%.o,$(ASMPP_SOURCES))
+DEPS := $(OBJECTS:.o=.d)
 
-# Physical Microcontroller Specs (STM32F103 / Blue Pill Cortex-M3 architecture)
-MCU = -mcpu=cortex-m3 -mthumb
+.PHONY: all clean size
+all: $(BUILD)/$(TARGET).elf $(BUILD)/$(TARGET).bin $(BUILD)/$(TARGET).hex
 
-# Compilation Flags (tells compiler where header files are, sets no optimizations for easy debugging, enables warnings)
-CFLAGS = $(MCU) -I$(INCDIR) -O0 -g3 -Wall
-
-# Linker Flags (tells compiler to use YOUR custom linker script and optimizes unused code segments)
-LDFLAGS = $(MCU) -T linker_script.ld --specs=nano.specs -Wl,--gc-sections
-
-# Automatically find all .c source files inside your src/ directory
-SOURCES = $(wildcard $(SRCDIR)/*.c)
-
-# Automatically generate matching .o object file paths inside the build/ directory
-OBJECTS = $(patsubst $(SRCDIR)/%.c, $(BUILDDIR)/%.o, $(SOURCES))
-
-# The default rule that runs when you just type 'make'
-all: $(BUILDDIR)/$(TARGET).elf $(BUILDDIR)/$(TARGET).bin
-
-# Rule 1: Compile every individual .c file into a temporary .o object file
-$(BUILDDIR)/%.o: $(SRCDIR)/%.c | $(BUILDDIR)
-	$(CC) $(CFLAGS) -c $< -o $@
-
-# Rule 2: Link all temporary object files together into the final execution binary using your linker script
-$(BUILDDIR)/$(TARGET).elf: $(OBJECTS)
-	$(CC) $(OBJECTS) $(LDFLAGS) -o $@
+$(BUILD)/$(TARGET).elf: $(OBJECTS) $(LDSCRIPT) Makefile
+	$(CC) $(OBJECTS) $(LDFLAGS) $(LDLIBS) -o $@
 	$(SIZE) $@
 
-# Rule 3: Convert that heavy execution binary into a raw, tiny .bin file you can flash to the chip
-$(BUILDDIR)/$(TARGET).bin: $(BUILDDIR)/$(TARGET).elf
+$(BUILD)/$(TARGET).bin: $(BUILD)/$(TARGET).elf
 	$(OBJCOPY) -O binary $< $@
 
-# Rule 4: Create the build directory if it doesn't already exist
-$(BUILDDIR):
-	mkdir -p $(BUILDDIR)
+$(BUILD)/$(TARGET).hex: $(BUILD)/$(TARGET).elf
+	$(OBJCOPY) -O ihex $< $@
 
-# Rule 5: A clean command to wipe out all compiled files so you can start completely fresh
+$(BUILD)/%.o: src/%.c Makefile
+	mkdir -p $(dir $@)
+	$(CC) $(CPPFLAGS) $(CFLAGS) -c $< -o $@
+
+$(BUILD)/%.o: src/%.s Makefile
+	mkdir -p $(dir $@)
+	$(CC) $(ASFLAGS) -c $< -o $@
+
+$(BUILD)/%.o: src/%.S Makefile
+	mkdir -p $(dir $@)
+	$(CC) $(CPPFLAGS) $(ASFLAGS) -MMD -MP -c $< -o $@
+
+size: $(BUILD)/$(TARGET).elf
+	$(SIZE) $<
+
 clean:
-	rm -rf $(BUILDDIR)
+	rm -rf $(BUILD)
+
+-include $(DEPS)
