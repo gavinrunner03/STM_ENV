@@ -1,67 +1,118 @@
-/* Entry Point Definition */
+/* STM32F103C8: GCC, direct Flash boot, ST startup_stm32f103xb.s.
+ * Heap/stack reservations are link-time minimums, not runtime guards.
+ */
 ENTRY(Reset_Handler)
-
-/* Highest address of the user mode stack */
-_estack = 0x20005000;    /* End of 20KB RAM (0x20000000 + 20KB) */
-
-/* Specify the memory areas available on the STM32F103C8 */
 MEMORY
 {
-  FLASH (rx)      : ORIGIN = 0x08000000, LENGTH = 64K
-  RAM   (xrw)     : ORIGIN = 0x20000000, LENGTH = 20K
+  FLASH (rx)  : ORIGIN = 0x08000000, LENGTH = 64K
+  RAM   (xrw) : ORIGIN = 0x20000000, LENGTH = 20K
 }
-
+_estack = ORIGIN(RAM) + LENGTH(RAM);
+_Min_Heap_Size = 0x200;
+_Min_Stack_Size = 0x400;
 SECTIONS
 {
-  /* 1. The Vector Table goes first into FLASH */
   .isr_vector :
   {
     . = ALIGN(4);
-    KEEP(*(.isr_vector)) 
+    KEEP(*(.isr_vector))
     . = ALIGN(4);
-  } >FLASH
+  } > FLASH
 
-  /* 2. The Program Code and read-only data go into FLASH */
   .text :
   {
     . = ALIGN(4);
-    *(.text)           /* Your compiled C code instructions */
-    *(.text*)          /* Sub-functions of code */
-    *(.rodata)         /* Read-only constants (like permanent strings) */
-    *(.rodata*)        
-    
-    /* PATCH: Include compiler helper sections so standard library utilities don't crash */
-    *(.glue_7)         /* glue arm to thumb code */
-    *(.glue_7t)        /* glue thumb to arm code */
-    *(.eh_frame)
-    
+    *(.text .text.*)
+    *(.glue_7 .glue_7t)
+    KEEP(*(.init))
+    KEEP(*(.fini))
+    *(.eh_frame .eh_frame.*)
     . = ALIGN(4);
-    _etext = .;        /* Create a pointer marking the exact end of code */
-  } >FLASH
+    _etext = .;
+  } > FLASH
 
-  /* Used by the startup code to find where the raw data sits in Flash */
+  .rodata :
+  {
+    . = ALIGN(4);
+    *(.rodata .rodata.*)
+    . = ALIGN(4);
+  } > FLASH
+
+  .ARM.extab : { *(.ARM.extab* .gnu.linkonce.armextab.*) } > FLASH
+  .ARM.exidx :
+  {
+    __exidx_start = .;
+    *(.ARM.exidx* .gnu.linkonce.armexidx.*)
+    __exidx_end = .;
+  } > FLASH
+
+  .preinit_array :
+  {
+    . = ALIGN(4);
+    PROVIDE_HIDDEN(__preinit_array_start = .);
+    KEEP(*(.preinit_array .preinit_array.*))
+    PROVIDE_HIDDEN(__preinit_array_end = .);
+  } > FLASH
+  .init_array :
+  {
+    . = ALIGN(4);
+    PROVIDE_HIDDEN(__init_array_start = .);
+    KEEP(*(SORT(.init_array.*)))
+    KEEP(*(.init_array))
+    PROVIDE_HIDDEN(__init_array_end = .);
+  } > FLASH
+  .fini_array :
+  {
+    . = ALIGN(4);
+    PROVIDE_HIDDEN(__fini_array_start = .);
+    KEEP(*(SORT(.fini_array.*)))
+    KEEP(*(.fini_array))
+    PROVIDE_HIDDEN(__fini_array_end = .);
+  } > FLASH
+
   _sidata = LOADADDR(.data);
-
-  /* 3. Initialized global/static variables go into RAM but are stored in FLASH */
   .data :
   {
     . = ALIGN(4);
-    _sdata = .;        /* Pointer to the start of RAM data variables */
-    *(.data)           /* Your initialized global variables */
-    *(.data*)          
+    _sdata = .;
+    *(.data .data.*)
+    *(.RamFunc .RamFunc.*)
     . = ALIGN(4);
-    _edata = .;        /* Pointer to the end of RAM data variables */
-  } >RAM AT> FLASH
+    _edata = .;
+  } > RAM AT> FLASH
 
-  /* 4. Uninitialized global/static variables (BSS) go completely into RAM */
-  .bss :
+  .bss (NOLOAD) :
   {
     . = ALIGN(4);
-    _sbss = .;         /* Start of BSS pointer */
-    *(.bss)            /* Variables like "int network_timeout;" (no starting value) */
-    *(.bss*)
-    *(COMMON)          /* PATCH: Allocate uninitialized variables tagged as COMMON */
+    _sbss = .;
+    __bss_start__ = .;
+    *(.bss .bss.*)
+    *(COMMON)
     . = ALIGN(4);
-    _ebss = .;         /* End of BSS pointer */
-  } >RAM
+    _ebss = .;
+    __bss_end__ = .;
+  } > RAM
+
+  .noinit (NOLOAD) :
+  {
+    . = ALIGN(4);
+    *(.noinit .noinit.*)
+    . = ALIGN(4);
+  } > RAM
+
+  .heap_stack_reservation (NOLOAD) :
+  {
+    . = ALIGN(8);
+    PROVIDE(end = .);
+    PROVIDE(_end = .);
+    __HeapBase = .;
+    . += _Min_Heap_Size;
+    __HeapLimit = .;
+    . += _Min_Stack_Size;
+    . = ALIGN(8);
+  } > RAM
+  __StackLimit = _estack - _Min_Stack_Size;
+  ASSERT(__HeapLimit <= __StackLimit, "RAM overflow: heap overlaps reserved stack")
+
+  .ARM.attributes 0 : { *(.ARM.attributes) }
 }
